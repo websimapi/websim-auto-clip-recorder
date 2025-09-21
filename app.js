@@ -94,6 +94,15 @@ function renderClips(){
     actions.style.gap="8px";
     actions.appendChild(editBtn);
     actions.appendChild(dl); 
+    const delBtn=document.createElement("button"); delBtn.textContent="Delete";
+    delBtn.addEventListener("click", ()=>{
+      if(!confirm("Are you sure you want to delete this clip?")) return;
+      compositionQueue.splice(0, compositionQueue.length, ...compositionQueue.filter(q=>q.id!==c.id));
+      clips = clips.filter(x=>x.id!==c.id);
+      renderClips();
+      saveClips(clips);
+    });
+    actions.appendChild(delBtn);
     card.appendChild(actions);
     
     if(c.composing){ 
