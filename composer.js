@@ -1,6 +1,6 @@
 /* ...existing code... */
 export async function composeClips(blobs, opts){
-  const { outroSeconds=3, logoUrl, outroAudio, width=1280, height=720, fps=30 } = opts;
+  const { outroSeconds=3, logoUrl, outroAudio, outroAudioRegion, width=1280, height=720, fps=30 } = opts;
 
   const canvas = document.createElement("canvas");
   canvas.width = width; canvas.height = height;
@@ -62,11 +62,27 @@ export async function composeClips(blobs, opts){
   async function playOutro(){
     // Draw logo centered for outroSeconds, and play outroAudio
     const img = await loadImage(logoUrl);
-    const audio = new Audio(outroAudio);
-    audio.crossOrigin = "anonymous";
-    const aNode = ac.createMediaElementSource(audio);
-    aNode.connect(masterGain);
-    audio.play().catch(()=>{});
+    
+    if (outroAudio) {
+      if (outroAudioRegion) {
+        // Use WebAudio for region playback
+        const audioBuffer = await fetch(outroAudio).then(r => r.arrayBuffer()).then(ab => ac.decodeAudioData(ab));
+        const source = ac.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(masterGain);
+        const offset = outroAudioRegion.start;
+        const duration = outroAudioRegion.end - outroAudioRegion.start;
+        source.start(ac.currentTime, offset, duration);
+      } else {
+        // Fallback to full audio playback
+        const audio = new Audio(outroAudio);
+        audio.crossOrigin = "anonymous";
+        const aNode = ac.createMediaElementSource(audio);
+        aNode.connect(masterGain);
+        audio.play().catch(()=>{});
+      }
+    }
+
     const start = performance.now();
     const dur = outroSeconds*1000;
     return new Promise((resolve)=>{
@@ -78,8 +94,6 @@ export async function composeClips(blobs, opts){
         if (now - start < dur) {
           requestAnimationFrame(render);
         } else {
-          audio.pause();
-          aNode.disconnect();
           resolve();
         }
       };
@@ -100,9 +114,10 @@ export async function composeClips(blobs, opts){
 
   for (const b of blobs){
     await playVideoBlob(b);
-    if (outroAudio && logoUrl) {
-      await playOutro();
-    }
+  }
+  
+  if (outroAudio && logoUrl) {
+    await playOutro();
   }
 
   recorder.stop();
