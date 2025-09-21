@@ -15,13 +15,66 @@ button:disabled{opacity:.5;cursor:not-allowed}
 #navigator{width:100%;height:100%;border:0}
 .hint{color:var(--muted);font-size:.9rem;margin-top:8px}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
-.clip{border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
-.thumb{width:100%;aspect-ratio:16/9;background:#000;object-fit:cover}
+.clip{border:1px solid var(--line);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative;}
+.thumb{width:100%;aspect-ratio:16/9;background:#000;object-fit:cover;cursor:pointer;}
 .clip-info{display:flex;justify-content:space-between;align-items:center;padding:8px 10px}
 .meta{font-size:.85rem;color:var(--muted)}
 .sel{display:flex;align-items:center;gap:6px}
 .compose-row{display:flex;align-items:center;gap:12px;margin-bottom:10px}
 #final-preview{width:100%;max-height:60vh;background:#000;border-radius:12px;border:1px solid var(--line)}
 .download-link{display:inline-block;margin-top:8px}
-/* ...existing styles... */
 
+.composing-overlay {
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  text-align: center;
+  pointer-events: none;
+}
+.composing-overlay::after {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentColor;
+  border-left-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-left: 6px;
+}
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.modal-backdrop {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.6);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.modal {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+#modal-video {
+  max-width: 100%;
+  max-height: calc(90vh - 100px);
+  border-radius: 8px;
+}
+#modal-close {
+  margin-top: 15px;
+  align-self: flex-end;
+}
+
+/* ...existing styles... */

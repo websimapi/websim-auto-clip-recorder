@@ -100,7 +100,9 @@ export async function composeClips(blobs, opts){
 
   for (const b of blobs){
     await playVideoBlob(b);
-    await playOutro();
+    if (outroAudio && logoUrl) {
+      await playOutro();
+    }
   }
 
   recorder.stop();
@@ -110,5 +112,73 @@ export async function composeClips(blobs, opts){
   });
   try { ac.close(); } catch {}
   return done;
+}
+
+export async function concatenateClips(blobs, opts) {
+    const { width = 1280, height = 720, fps = 30 } = opts;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#000";
+    ctx.fillRect(0, 0, width, height);
+
+    const stream = canvas.captureStream(fps);
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const mixDest = ac.createMediaStreamDestination();
+    stream.addTrack(mixDest.stream.getAudioTracks()[0]);
+
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9,opus" });
+    const outChunks = [];
+    recorder.ondataavailable = e => { if (e.data.size) outChunks.push(e.data); };
+
+    const drawLetterbox = () => { ctx.fillStyle = "#000"; ctx.fillRect(0, 0, width, height); };
+
+    async function playVideoBlob(blob) {
+        return new Promise((resolve) => {
+            const v = document.createElement("video");
+            v.src = URL.createObjectURL(blob);
+            v.playsInline = true;
+            v.crossOrigin = "anonymous";
+            v.muted = false; // important for concatenation
+            const srcNode = ac.createMediaElementSource(v);
+            srcNode.connect(mixDest);
+            v.addEventListener("loadedmetadata", () => {
+                v.play();
+                const render = () => {
+                    drawLetterbox();
+                    const vw = v.videoWidth || 16, vh = v.videoHeight || 9;
+                    const scale = Math.min(width / vw, height / vh);
+                    const dw = vw * scale, dh = vh * scale;
+                    const dx = (width - dw) / 2, dy = (height - dh) / 2;
+                    ctx.drawImage(v, dx, dy, dw, dh);
+                    if (!v.paused && !v.ended) {
+                        requestAnimationFrame(render);
+                    }
+                };
+                render();
+            }, { once: true });
+            v.addEventListener("ended", () => {
+                srcNode.disconnect();
+                URL.revokeObjectURL(v.src);
+                resolve();
+            }, { once: true });
+        });
+    }
+
+    recorder.start(200);
+
+    for (const b of blobs) {
+        await playVideoBlob(b);
+    }
+
+    recorder.stop();
+
+    const done = await new Promise((res) => {
+        recorder.onstop = () => res(new Blob(outChunks, { type: "video/webm" }));
+    });
+    try { ac.close(); } catch { }
+    return done;
 }
 /* ...existing code... */

@@ -13,7 +13,10 @@ const els = {
   navigator: document.getElementById("navigator"),
   composeBtn: document.getElementById("btn-compose"),
   composeStatus: document.getElementById("compose-status"),
-  autoSplitCaptured: document.getElementById("auto-split-captured")
+  autoSplitCaptured: document.getElementById("auto-split-captured"),
+  modalBackdrop: document.getElementById('modal-backdrop'),
+  modalVideo: document.getElementById('modal-video'),
+  modalClose: document.getElementById('modal-close'),
 };
 
 let captureStream = null;
@@ -24,6 +27,21 @@ let recording = false;
 let currentClipStart = null;
 let monitoredUrl = null;
 let capMon = { interval: null, videoEl: null, canvas: null, ctx: null };
+
+function getVideoDuration(blob) {
+    return new Promise((resolve) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.onloadedmetadata = function() {
+            window.URL.revokeObjectURL(video.src);
+            resolve(video.duration * 1000);
+        }
+        video.onerror = function() {
+            resolve(0); // or reject
+        }
+        video.src = URL.createObjectURL(blob);
+    });
+}
 
 function fmtTime(ms){
   const s = Math.round(ms/1000);
@@ -57,11 +75,19 @@ function renderClips(){
     const img = document.createElement("img");
     img.className="thumb";
     img.src = c.thumb || "";
+    img.addEventListener('click', () => {
+      if (c.blob) {
+        els.modalVideo.src = URL.createObjectURL(c.blob);
+        els.modalBackdrop.style.display = 'flex';
+        els.modalVideo.play().catch(e => console.error("Preview play failed:", e));
+      }
+    });
+
     const info = document.createElement("div");
     info.className="clip-info";
     const meta = document.createElement("div");
     meta.className="meta";
-    meta.textContent = `Clip ${idx+1} • ${fmtTime(c.duration)} • ${new Date(c.createdAt).toLocaleTimeString()}`;
+    meta.textContent = `Clip ${idx+1} • ${c.duration ? fmtTime(c.duration) : '--:--'} • ${new Date(c.createdAt).toLocaleTimeString()}`;
     const sel = document.createElement("label");
     sel.className="sel";
     const cb = document.createElement("input");
@@ -70,15 +96,31 @@ function renderClips(){
     cb.addEventListener("change", ()=>{ c.selected = cb.checked; persistClips(); toggleComposeBtn(); });
     const dl = document.createElement("a");
     dl.textContent="Download";
-    dl.href = URL.createObjectURL(c.blob);
-    dl.download = `clip-${idx+1}.webm`;
+    dl.href = c.blob ? URL.createObjectURL(c.blob) : '#';
+    if (!c.blob) {
+        dl.style.pointerEvents = 'none';
+        dl.style.opacity = '0.5';
+    }
+    dl.download = `clip-${idx+1}-composed.webm`;
     sel.appendChild(cb);
     sel.appendChild(document.createTextNode("Select"));
     info.appendChild(meta);
     info.appendChild(sel);
     card.appendChild(img);
     card.appendChild(info);
-    card.appendChild(dl);
+    
+    const actions = document.createElement("div");
+    actions.style.padding = "0 10px 8px";
+    actions.appendChild(dl);
+    card.appendChild(actions);
+
+    if (c.composing) {
+        const overlay = document.createElement('div');
+        overlay.className = 'composing-overlay';
+        overlay.textContent = 'Composing...';
+        card.appendChild(overlay);
+    }
+    
     els.grid.appendChild(card);
   });
   toggleComposeBtn();
@@ -89,7 +131,7 @@ function toggleComposeBtn(){
 }
 
 async function persistClips(){
-  try { await idbSet("auto-clip-clips", clips.map(c=>({ ...c, blob: undefined, blobUrl: URL.createObjectURL(c.blob) }))); } catch {}
+  try { await idbSet("auto-clip-clips", clips.map(c=>({ ...c, blob: undefined, rawBlob: undefined, blobUrl: c.blob ? URL.createObjectURL(c.blob) : null }))); } catch {}
 }
 
 async function restoreClips(){
@@ -97,8 +139,19 @@ async function restoreClips(){
     const saved = await idbGet("auto-clip-clips");
     if (Array.isArray(saved)) {
       clips = await Promise.all(saved.map(async s=>{
-        const blob = await fetch(s.blobUrl).then(r=>r.blob());
-        return { ...s, blob };
+        if (s.composing) { // Don't try to restore composing clips, let them re-compose
+            return {...s, blob: null, composing: false}; // Or re-trigger composition
+        }
+        if (s.blobUrl) {
+          try {
+            const blob = await fetch(s.blobUrl).then(r=>r.blob());
+            return { ...s, blob, composing: false };
+          } catch(e) {
+            console.warn(`Could not restore clip from ${s.blobUrl}`);
+            return {...s, blob:null, composing: false};
+          }
+        }
+        return {...s, composing: false};
       }));
       renderClips();
     }
@@ -110,17 +163,67 @@ function setupRecorder(){
   chunks = [];
   recorder.ondataavailable = e => { if (e.data && e.data.size>0) chunks.push(e.data); };
   recorder.onstop = async () => {
+    if (!chunks.length) {
+      if (recording) {
+        currentClipStart = Date.now();
+        recorder.start(1000);
+      }
+      return;
+    }
     const rawBlob = new Blob(chunks, { type: "video/webm" });
     const duration = Date.now() - currentClipStart;
-    const { composeClips } = await import("./composer.js");
-    const composedBlob = await composeClips([rawBlob], {
-      outroSeconds: 3, logoUrl: "/logowhite.png", outroAudio: "/hey_hype_radio (2).mp3",
-      width: 1280, height: 720, fps: 30
-    });
-    const thumb = await makeThumb(composedBlob);
-    clips.push({ blob: composedBlob, createdAt: Date.now(), duration, thumb, selected: true });
-    renderClips(); persistClips(); chunks = [];
-    if (recording) { currentClipStart = Date.now(); recorder.start(1000); }
+    const thumb = await makeThumb(rawBlob);
+    
+    const clip = { 
+      id: Date.now() + Math.random(),
+      rawBlob, 
+      blob: null, 
+      createdAt: Date.now(), 
+      duration: duration, 
+      thumb, 
+      selected: true,
+      composing: true,
+    };
+    clips.push(clip);
+    renderClips(); 
+    persistClips();
+    chunks = [];
+
+    (async () => {
+        try {
+            const { composeClips } = await import("./composer.js");
+            const composedBlob = await composeClips([rawBlob], {
+                outroSeconds: 3,
+                logoUrl: "/logowhite.png",
+                outroAudio: "/hey_hype_radio (2).mp3",
+                width: 1280,
+                height: 720,
+                fps: 30
+            });
+            const clipToUpdate = clips.find(c => c.id === clip.id);
+            if (clipToUpdate) {
+                clipToUpdate.blob = composedBlob;
+                clipToUpdate.composing = false;
+                clipToUpdate.duration = await getVideoDuration(composedBlob);
+                renderClips();
+                persistClips();
+            }
+        } catch (e) {
+            console.error("Auto-composition failed for clip", clip.id, e);
+            const clipToUpdate = clips.find(c => c.id === clip.id);
+            if (clipToUpdate) {
+                clipToUpdate.composing = false; 
+                clipToUpdate.blob = rawBlob; // fallback to raw
+                renderClips();
+                persistClips();
+            }
+        }
+    })();
+
+    if (recording) {
+      currentClipStart = Date.now();
+      recorder.start(1000);
+    }
   };
 }
 
@@ -222,17 +325,14 @@ function setupNavigator(){
 }
 
 document.getElementById("btn-compose").addEventListener("click", async ()=>{
-  const selected = clips.filter(c=>c.selected);
+  const selected = clips.filter(c=>c.selected && c.blob && !c.composing);
   if (!selected.length) return;
   els.composeStatus.textContent = "Composing...";
   els.composeStatus.style.color = "";
   els.composeBtn.disabled = true;
   try {
-    const { composeClips } = await import("./composer.js");
-    const out = await composeClips(selected.map(c=>c.blob), {
-      outroSeconds: 0,
-      logoUrl: "/logowhite.png",
-      outroAudio: "/hey_hype_radio (2).mp3",
+    const { concatenateClips } = await import("./composer.js");
+    const out = await concatenateClips(selected.map(c=>c.blob), {
       width: 1280,
       height: 720,
       fps: 30
@@ -259,6 +359,17 @@ els.pick.addEventListener("click", pickTab);
 els.start.addEventListener("click", startRecording);
 els.split.addEventListener("click", splitClip);
 els.stop.addEventListener("click", stopAll);
+
+els.modalClose.addEventListener('click', () => {
+    els.modalBackdrop.style.display = 'none';
+    els.modalVideo.pause();
+    els.modalVideo.src = '';
+});
+els.modalBackdrop.addEventListener('click', (e) => {
+    if (e.target === els.modalBackdrop) {
+        els.modalClose.click();
+    }
+});
 
 setupNavigator();
 restoreClips();
