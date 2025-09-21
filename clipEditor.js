@@ -152,7 +152,7 @@ export function createClipEditor(container) {
     };
     recorder = recorderInstance;
     onSave = saveCallback;
-    recordingBounds = recorder.getRecordingBounds();
+    recordingBounds = recorder.getRecordingBounds() || { startTime: currentClip.editStartTime, totalDuration: (currentClip.editEndTime - currentClip.editStartTime) };
 
     modal.style.display = 'flex';
     updateTimeline();

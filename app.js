@@ -35,16 +35,17 @@ function fmtTime(ms){ const s = Math.round(ms/1000); return `${Math.floor(s/60)}
 async function getVideoDuration(blob){ return new Promise((resolve)=>{ const v=document.createElement('video'); v.preload='metadata'; v.onloadedmetadata=()=>{ URL.revokeObjectURL(v.src); resolve(v.duration*1000); }; v.onerror=()=>resolve(0); v.src=URL.createObjectURL(blob); }); }
 async function makeThumb(blob){ return new Promise((res)=>{ const v=document.createElement("video"); v.src=URL.createObjectURL(blob); v.muted=true; v.addEventListener("loadeddata", ()=>{ v.currentTime=Math.min(0.25,(v.duration||1)*0.1); }, {once:true}); v.addEventListener("seeked", ()=>{ const c=document.createElement("canvas"); c.width=320; c.height=180; c.getContext("2d").drawImage(v,0,0,c.width,c.height); c.toBlob(b=>res(URL.createObjectURL(b)),"image/jpeg",0.7); URL.revokeObjectURL(v.src); }, {once:true}); }); }
 
-function toggleComposeBtn(){ els.composeBtn.disabled = !(clips.some(c=>c.selected && !c.composing && c.blob)); }
+function toggleComposeBtn(){ els.composeBtn.disabled = !(clips.some(c=>c.selected && !c.composing && (c.blob || c.remoteUrl))); }
 
 function renderClips(){
   els.grid.innerHTML = "";
   clips.forEach((c, idx)=>{
     const card=document.createElement("div"); card.className="clip";
-    const img=document.createElement("img"); img.className="thumb"; img.src=c.thumb||""; 
+    const img=document.createElement("img"); img.className="thumb"; img.src=c.thumb || c.thumbUrl || ""; 
     img.addEventListener('click',()=>{ 
-      if(c.blob){ 
-        els.modalVideo.src=URL.createObjectURL(c.blob); 
+      const src = c.blob ? URL.createObjectURL(c.blob) : (c.remoteUrl || "");
+      if(src){ 
+        els.modalVideo.src=src; 
         els.modalBackdrop.style.display='flex'; 
         els.modalVideo.play().catch(()=>{}); 
       } 
@@ -79,8 +80,8 @@ function renderClips(){
     });
     
     const dl=document.createElement("a"); dl.textContent="Download"; 
-    dl.href=c.blob?URL.createObjectURL(c.blob):'#'; 
-    if(!c.blob){ dl.style.pointerEvents='none'; dl.style.opacity='0.5'; } 
+    dl.href = c.blob ? URL.createObjectURL(c.blob) : (c.remoteUrl || '#');
+    if(!c.blob && !c.remoteUrl){ dl.style.pointerEvents='none'; dl.style.opacity='0.5'; } 
     dl.download=`clip-${idx+1}-composed.webm`;
     
     sel.appendChild(cb); sel.appendChild(document.createTextNode("Select")); 
@@ -125,9 +126,21 @@ async function composeSingleClip(clip) {
         clip.thumb = await makeThumb(composedBlob);
         clip.duration = await getVideoDuration(composedBlob);
 
+        try {
+          if (window.websim?.upload) {
+            const videoUrl = await window.websim.upload(new File([composedBlob], `clip-${clip.id}.webm`, { type: composedBlob.type }));
+            clip.remoteUrl = videoUrl;
+            // Upload thumb
+            const thumbBlob = await (await fetch(clip.thumb)).blob();
+            const thumbUrl = await window.websim.upload(new File([thumbBlob], `thumb-${clip.id}.jpg`, { type: thumbBlob.type }));
+            clip.thumbUrl = thumbUrl;
+          }
+        } catch (e) {
+          console.warn("Upload failed, continuing with local URLs.", e);
+        }
+
     } catch (e) {
         console.error("Composition failed for clip", clip.id, e);
-        // Keep raw blob as fallback if available
         if (clip.rawBlob) clip.blob = clip.rawBlob;
     } finally {
         clip.composing = false;
@@ -189,12 +202,18 @@ function setupNavigator(){
 }
 
 document.getElementById("btn-compose").addEventListener("click", async ()=>{
-  const selected = clips.filter(c=>c.selected && c.blob && !c.composing);
+  const selected = clips.filter(c=>c.selected && !c.composing && (c.blob || c.remoteUrl));
   if(!selected.length) return;
   els.composeStatus.textContent="Composing..."; els.composeStatus.style.color=""; els.composeBtn.disabled=true;
   try{
+    // Ensure blobs from URLs if needed
+    const blobs = await Promise.all(selected.map(async c=>{
+      if (c.blob) return c.blob;
+      const res = await fetch(c.remoteUrl);
+      return await res.blob();
+    }));
     const outro = getSelectedOutro();
-    const out = await concatenateClips(selected.map(c=>c.blob), { 
+    const out = await concatenateClips(blobs, { 
       width:1280, 
       height:720, 
       fps:30,
