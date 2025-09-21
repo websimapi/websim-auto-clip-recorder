@@ -110,16 +110,17 @@ function setupRecorder(){
   chunks = [];
   recorder.ondataavailable = e => { if (e.data && e.data.size>0) chunks.push(e.data); };
   recorder.onstop = async () => {
-    const blob = new Blob(chunks, { type: "video/webm" });
+    const rawBlob = new Blob(chunks, { type: "video/webm" });
     const duration = Date.now() - currentClipStart;
-    const thumb = await makeThumb(blob);
-    clips.push({ blob, createdAt: Date.now(), duration, thumb, selected: true });
-    renderClips(); persistClips();
-    chunks = [];
-    if (recording) {
-      currentClipStart = Date.now();
-      recorder.start(1000);
-    }
+    const { composeClips } = await import("./composer.js");
+    const composedBlob = await composeClips([rawBlob], {
+      outroSeconds: 3, logoUrl: "/logowhite.png", outroAudio: "/hey_hype_radio (2).mp3",
+      width: 1280, height: 720, fps: 30
+    });
+    const thumb = await makeThumb(composedBlob);
+    clips.push({ blob: composedBlob, createdAt: Date.now(), duration, thumb, selected: true });
+    renderClips(); persistClips(); chunks = [];
+    if (recording) { currentClipStart = Date.now(); recorder.start(1000); }
   };
 }
 
@@ -229,7 +230,7 @@ document.getElementById("btn-compose").addEventListener("click", async ()=>{
   try {
     const { composeClips } = await import("./composer.js");
     const out = await composeClips(selected.map(c=>c.blob), {
-      outroSeconds: 3,
+      outroSeconds: 0,
       logoUrl: "/logowhite.png",
       outroAudio: "/hey_hype_radio (2).mp3",
       width: 1280,
