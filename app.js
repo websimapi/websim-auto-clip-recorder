@@ -12,7 +12,8 @@ const els = {
   autoSplit: document.getElementById("auto-split-on-nav"),
   navigator: document.getElementById("navigator"),
   composeBtn: document.getElementById("btn-compose"),
-  composeStatus: document.getElementById("compose-status")
+  composeStatus: document.getElementById("compose-status"),
+  autoSplitCaptured: document.getElementById("auto-split-captured")
 };
 
 let captureStream = null;
@@ -22,6 +23,7 @@ let clips = [];
 let recording = false;
 let currentClipStart = null;
 let monitoredUrl = null;
+let capMon = { interval: null, videoEl: null, canvas: null, ctx: null };
 
 function fmtTime(ms){
   const s = Math.round(ms/1000);
@@ -147,6 +149,7 @@ function startRecording(){
   els.start.disabled = true;
   els.stop.disabled = false;
   els.split.disabled = false;
+  if (els.autoSplitCaptured.checked) startCaptureHeuristics();
 }
 
 function splitClip(){
@@ -167,6 +170,36 @@ function stopAll(){
   els.start.disabled = !captureStream;
   els.stop.disabled = true;
   els.split.disabled = true;
+  stopCaptureHeuristics();
+}
+
+function startCaptureHeuristics(){
+  if (!captureStream) return;
+  const v = document.createElement("video");
+  v.srcObject = captureStream; v.muted = true; v.play().catch(()=>{});
+  const c = document.createElement("canvas"); c.width = 64; c.height = 36;
+  const x = c.getContext("2d"); let lastSig = null; let lastMute = 0;
+  const vt = captureStream.getVideoTracks()[0];
+  vt.onmute = ()=>{ lastMute = Date.now(); };
+  vt.onunmute = ()=>{ if (recording && Date.now()-lastMute<2000) splitClip(); };
+  capMon = { interval: setInterval(()=>{
+    if (!recording) return;
+    try {
+      x.drawImage(v,0,0,c.width,c.height);
+      const d = x.getImageData(0,0,c.width,c.height).data;
+      let sum=0, varsum=0;
+      for (let i=0;i<d.length;i+=4){ const g=(d[i]*0.2126+d[i+1]*0.7152+d[i+2]*0.0722); sum+=g; varsum+=g*g; }
+      const n=d.length/4, mean=sum/n, std=Math.sqrt(Math.max(0,varsum/n-mean*mean));
+      const sig = mean+std*2; // simple signature
+      if (lastSig!==null && Math.abs(sig-lastSig)>40) splitClip();
+      lastSig = sig;
+    } catch {}
+  }, 800), videoEl: v, canvas: c, ctx: x };
+}
+
+function stopCaptureHeuristics(){
+  if (capMon.interval) clearInterval(capMon.interval);
+  capMon = { interval: null, videoEl: null, canvas: null, ctx: null };
 }
 
 function setupNavigator(){
@@ -229,4 +262,3 @@ els.stop.addEventListener("click", stopAll);
 setupNavigator();
 restoreClips();
 /* ...existing code... */
-

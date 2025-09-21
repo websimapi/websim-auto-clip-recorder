@@ -100,8 +100,8 @@ export async function composeClips(blobs, opts){
 
   for (const b of blobs){
     await playVideoBlob(b);
+    await playOutro();
   }
-  await playOutro();
 
   recorder.stop();
 
@@ -112,4 +112,3 @@ export async function composeClips(blobs, opts){
   return done;
 }
 /* ...existing code... */
-
