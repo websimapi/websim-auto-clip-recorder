@@ -26,7 +26,7 @@ class Composer {
     masterGain.connect(mixDest);
     stream.addTrack(mixDest.stream.getAudioTracks()[0]);
 
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9,opus" });
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9,opus", audioBitsPerSecond: 256000, videoBitsPerSecond: 5000000 });
     const outChunks = [];
     recorder.ondataavailable = e => { if (e.data.size) outChunks.push(e.data); };
 
@@ -41,7 +41,7 @@ class Composer {
         v.src = URL.createObjectURL(blob);
         v.playsInline = true;
         v.crossOrigin = "anonymous";
-        v.muted = false;
+        v.muted = true; v.volume = 0;
 
         const srcNode = ac.createMediaElementSource(v);
         srcNode.connect(masterGain);
@@ -101,7 +101,9 @@ class Composer {
             const source = ac.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(masterGain);
-            source.start(ac.currentTime, outroAudioRegion.start, outroAudioRegion.end - outroAudioRegion.start);
+            const offset = outroAudioRegion ? Math.max(0, outroAudioRegion.start) : 0;
+            const dur = outroAudioRegion ? Math.max(0.001, outroAudioRegion.end - outroAudioRegion.start) : undefined;
+            source.start(ac.currentTime, offset, dur);
           } else {
             const audio = new Audio(outroAudio);
             audio.crossOrigin = "anonymous";
@@ -203,7 +205,7 @@ export async function concatenateClips(blobs, opts) {
     masterGain.connect(mixDest);
     stream.addTrack(mixDest.stream.getAudioTracks()[0]);
 
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9,opus" });
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9,opus", audioBitsPerSecond: 256000, videoBitsPerSecond: 5000000 });
     const outChunks = [];
     recorder.ondataavailable = e => { if (e.data.size) outChunks.push(e.data); };
 
@@ -225,7 +227,7 @@ export async function concatenateClips(blobs, opts) {
             v.src = URL.createObjectURL(blob);
             v.playsInline = true;
             v.crossOrigin = "anonymous";
-            v.muted = false;
+            v.muted = true; v.volume = 0;
             const srcNode = ac.createMediaElementSource(v);
             srcNode.connect(masterGain);
             let renderLoopId;
@@ -277,7 +279,9 @@ export async function concatenateClips(blobs, opts) {
             const source = ac.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(masterGain);
-            source.start(ac.currentTime, outroAudioRegion.start, outroAudioRegion.end - outroAudioRegion.start);
+            const offset = outroAudioRegion ? Math.max(0, outroAudioRegion.start) : 0;
+            const dur = outroAudioRegion ? Math.max(0.001, outroAudioRegion.end - outroAudioRegion.start) : undefined;
+            source.start(ac.currentTime, offset, dur);
           } else {
             const audio = new Audio(outroAudio);
             audio.crossOrigin = "anonymous";
