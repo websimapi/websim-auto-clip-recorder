@@ -15,6 +15,7 @@ class Composer {
 
   async compose(blobs, opts) {
     const { outroSeconds = 3, logoUrl, outroAudio, outroAudioRegion } = opts;
+    const introAsset = opts.introAsset || null;
 
     const ac = new (window.AudioContext || window.webkitAudioContext)();
     if (ac.state === 'suspended') await ac.resume();
@@ -92,6 +93,29 @@ class Composer {
       });
     };
 
+    const playIntro = async () => {
+      if (!introAsset) return;
+      if (introAsset.type === 'video') {
+        const vBlob = typeof introAsset.src === 'string' ? await (await fetch(introAsset.src)).blob() : introAsset.src;
+        await playVideoBlob(vBlob);
+      } else if (introAsset.type === 'image') {
+        try {
+          const img = await this._loadImage(introAsset.src);
+          const durMs = Math.max(500, (introAsset.duration || 2) * 1000);
+          await new Promise((resolve)=>{
+            const start = performance.now();
+            const render = () => {
+              drawLetterbox();
+              const iw = Math.min(this.width * 0.6, img.width), ih = iw * (img.height / img.width);
+              this.ctx.drawImage(img, (this.width - iw)/2, (this.height - ih)/2, iw, ih);
+              if (performance.now() - start < durMs) requestAnimationFrame(render); else resolve();
+            };
+            render();
+          });
+        } catch {}
+      }
+    };
+
     const playOutro = async () => {
       try {
         const img = await this._loadImage(logoUrl);
@@ -138,6 +162,7 @@ class Composer {
     
     recorder.start(200);
 
+    if (introAsset) await playIntro();
     for (const b of blobs) {
       await playVideoBlob(b);
     }
@@ -188,6 +213,7 @@ export async function concatenateClips(blobs, opts) {
       outroAudio, 
       outroAudioRegion 
     } = opts;
+    const introAsset = opts.introAsset || null;
 
     const canvas = document.createElement("canvas");
     canvas.width = width;
@@ -270,6 +296,29 @@ export async function concatenateClips(blobs, opts) {
         });
     }
     
+    const playIntro = async () => {
+      if (!introAsset) return;
+      if (introAsset.type === 'video') {
+        const vBlob = typeof introAsset.src === 'string' ? await (await fetch(introAsset.src)).blob() : introAsset.src;
+        await playVideoBlob(vBlob);
+      } else if (introAsset.type === 'image') {
+        try {
+          const img = await _loadImage(introAsset.src);
+          const durMs = Math.max(500, (introAsset.duration || 2) * 1000);
+          await new Promise((resolve)=>{
+            const start = performance.now();
+            const render = () => {
+              drawLetterbox();
+              const iw = Math.min(width * 0.6, img.width), ih = iw * (img.height / img.width);
+              ctx.drawImage(img, (width - iw)/2, (height - ih)/2, iw, ih);
+              if (performance.now() - start < durMs) requestAnimationFrame(render); else resolve();
+            };
+            render();
+          });
+        } catch {}
+      }
+    };
+
     const playOutro = async () => {
       try {
         const img = await _loadImage(logoUrl);
@@ -315,6 +364,7 @@ export async function concatenateClips(blobs, opts) {
 
     recorder.start(200);
 
+    if (introAsset) await playIntro();
     for (const b of blobs) {
         await playVideoBlob(b);
     }
